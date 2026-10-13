@@ -1,0 +1,23 @@
+{
+  "device_serial": "",
+  "mode": "auto",
+  "dry_run": false,
+  "daily_cap": 0,
+  "delay_seconds": [
+    5,
+    8
+  ],
+  "dry_run_delay_seconds": [
+    5,
+    10
+  ],
+  "skip_probability": 0.25,
+  "active_hours": [
+    0,
+    24
+  ],
+  "max_scrolls": 3,
+  "comment_no_repeat": 40,
+  "approval_timeout_seconds": 600,
+  "max_restarts_in_a_row": 3
+}

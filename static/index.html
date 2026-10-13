@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hingevala Control</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #e3e1db;
+    --accent: #2f6f4e; --accent-text: #ffffff; --danger: #b3261e; --warn: #9a6700; --log-bg: #fbfaf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --card: #1f1f1d; --text: #ecebe7; --muted: #a09f99; --line: #33322f;
+      --accent: #5fae84; --accent-text: #0e1a13; --danger: #f2827a; --warn: #e3b341; --log-bg: #191918;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .pill.on { color: var(--accent); border-color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button { font: inherit; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; }
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  select, input[type=number], textarea { font: inherit; color: var(--text); background: var(--bg);
+           border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  input[type=number] { width: 72px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .dry { color: var(--warn); font-size: 13px; margin-top: 10px; }
+  #pending .label { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  #pending .target { margin: 0 0 14px; font-size: 16px; overflow-wrap: anywhere; }
+  #pending ul { margin: 0; padding-left: 18px; }
+  #pending textarea { width: 100%; min-height: 64px; margin: 10px 0; }
+  .muted { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  pre { margin: 0; max-height: 320px; overflow: auto; background: var(--log-bg); padding: 10px;
+        border-radius: 8px; font-size: 12.5px; white-space: pre-wrap; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Hingevala</h1>
+    <span id="state" class="pill">stopped</span>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <button id="start" class="primary">Start</button>
+      <button id="stop" class="danger">Stop</button>
+      <label><input type="checkbox" id="dry_run"> Dry run</label>
+      <label>Mode
+        <select id="mode">
+          <option value="approve">Approve each</option>
+          <option value="auto">Full auto</option>
+        </select>
+      </label>
+      <label>Daily cap (0 = no limit) <input type="number" id="daily_cap" min="0"></label>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sent">0</b><span>sent today</span></div>
+      <div class="stat"><b id="dry_runs">0</b><span>dry-run tests</span></div>
+      <div class="stat"><b id="next">–</b><span>next action in</span></div>
+    </div>
+    <div id="dry_note" class="dry"><strong>Dry run is ON:</strong> it only logs what it would like and comment. Untick “Dry run” to actually send.</div>
+  </section>
+
+  <section id="pending" class="card" hidden>
+    <p class="label">Liking</p>
+    <p id="target" class="target"></p>
+    <p class="label">Also on screen</p>
+    <ul id="profile_items" class="muted"></ul>
+    <textarea id="comment" aria-label="Comment to send"></textarea>
+    <div class="row">
+      <button id="send" class="primary">Send like</button>
+      <button id="skip">Skip</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <pre id="log">No activity yet.</pre>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pendingId = null;
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function render(s) {
+  $("state").textContent = s.state;
+  $("state").classList.toggle("on", s.running);
+  $("start").disabled = s.running;
+  $("stop").disabled = !s.running;
+  if (document.activeElement !== $("daily_cap")) $("daily_cap").value = s.daily_cap;
+  $("dry_run").checked = s.dry_run;
+  $("mode").value = s.mode;
+  $("sent").textContent = s.daily_cap ? `${s.sent_today}/${s.daily_cap}` : `${s.sent_today}`;
+  $("dry_runs").textContent = s.dry_runs;
+  $("next").textContent = s.next_action_in == null ? "–" : `${s.next_action_in}s`;
+  $("dry_note").hidden = !s.dry_run;
+
+  const p = s.pending;
+  $("pending").hidden = !p;
+  if (p && p.id !== pendingId) {
+    pendingId = p.id;
+    $("target").textContent = p.target;
+    $("profile_items").replaceChildren(...p.profile_items.filter((t) => t !== p.target).map((t) => {
+      const li = document.createElement("li");
+      li.textContent = t;
+      return li;
+    }));
+    $("comment").value = p.comment;
+  }
+  if (!p) pendingId = null;
+
+  const log = $("log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = s.log.length ? s.log.join("\n") : "No activity yet.";
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+async function refresh() {
+  try { render(await api("/api/status")); } catch (e) { $("state").textContent = "control page offline"; }
+}
+
+$("start").onclick = () => api("/api/start", {}).then(refresh);
+$("stop").onclick = () => api("/api/stop", {}).then(refresh);
+$("dry_run").onchange = (e) => api("/api/options", { dry_run: e.target.checked }).then(render);
+$("mode").onchange = (e) => api("/api/options", { mode: e.target.value }).then(render);
+$("daily_cap").onchange = (e) => api("/api/options", { daily_cap: Number(e.target.value) }).then(render).catch(refresh);
+
+async function decide(action) {
+  if (!pendingId) return;
+  await api("/api/decide", { id: pendingId, action, comment: $("comment").value }).catch(() => {});
+  $("pending").hidden = true;
+  refresh();
+}
+$("send").onclick = () => decide("send");
+$("skip").onclick = () => decide("skip");
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>
