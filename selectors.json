@@ -19,14 +19,18 @@
   },
   "like_sheet": {
     "_verified": "2026-10-09: the comment box is a custom view described 'Edit comment' (no EditText); the keyboard types into it. Once text is in the box, 'Send like' becomes 'Send like with message' (and the Rose button 'Send a Rose with message'), so match exactly to never hit the Rose. There's no close button, and Back is unreliable (an extra one leaves Hinge), so the bot never closes the sheet itself: it either sends or stops.",
+    "_verified_hingex": "2026-10-14 after upgrading to HingeX: the button is 'Send priority like', and 'Send priority like with message' once text is in the box (Rose: 'Send a Rose with message'). The plain 'Send like' labels are kept as fallbacks.",
     "comment_field": [
       {"description": "Edit comment"}
     ],
     "send_button": [
+      {"className": "android.widget.Button", "description": "Send priority like with message"},
       {"className": "android.widget.Button", "description": "Send like with message"},
+      {"className": "android.widget.Button", "description": "Send priority like"},
       {"className": "android.widget.Button", "description": "Send like"}
     ],
     "comment_typed_marker": [
+      {"className": "android.widget.Button", "description": "Send priority like with message"},
       {"className": "android.widget.Button", "description": "Send like with message"}
     ]
   },

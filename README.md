@@ -12,6 +12,12 @@ Sends Hinge likes, each with a short comment, from an Android emulator. A local 
 
 First open Hinge on the emulator and go to the **Discover** tab.
 
+If the emulator sometimes freezes or crashes, also run the watchdog in a second terminal. It restarts the emulator and presses Start again:
+
+```bash
+.venv/bin/python tools/watchdog.py --avd Pixel_7
+```
+
 ## How it works
 
 - `hinge/bot.py` is the loop. It reads the screen, skips some profiles at random, picks a random photo or prompt, writes a comment, sends the like and waits a random time. It stops on any screen it doesn't recognise.
