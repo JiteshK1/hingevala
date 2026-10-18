@@ -127,7 +127,7 @@ Safety details built in:
 | `skip_keywords` | Skip a profile whose text contains any of these (whole words, any case). `[]` = off | `["he/him", "smoke regularly"]` |
 | `profile_read_scrolls` | How many scrolls down a profile to read before checking `skip_keywords` | `8` |
 | `ai_comments` | Write each comment with Claude from the profile's prompts; falls back to `comments.txt` on any error | `true` |
-| `ai_model` | Claude model for comments | `"claude-opus-5-5"` |
+| `ai_model` | Claude model for comments. `claude-haiku-5-5` is fastest and cheapest; `claude-opus-5-5` writes better but slower | `"claude-haiku-5-5"` |
 | `ai_style` | Extra style notes for the comments | `"tease a little"` |
 | `ai_prefer_prompts` | With AI comments, like a prompt rather than a photo when both are visible | `true` |
 | `active_hours` | Hours it may run, `[start, end)`, 24h clock | `[8, 24]` |

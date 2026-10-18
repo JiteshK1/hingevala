@@ -7,6 +7,7 @@ import time
 import traceback
 import uuid
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -61,6 +62,7 @@ class Bot:
         self._emulator_restarts: List[float] = []
         self._ai = None
         self._ai_paused_until = 0.0
+        self._ai_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-comment")
         self.log_lines = deque(maxlen=300)
 
         self._stop = threading.Event()
@@ -302,24 +304,63 @@ class Bot:
 
         patterns = self._keyword_patterns()
         texts: List[str] = []
+        # With AI comments, stay at the bottom after reading: the bot picks a prompt
+        # there, starts the comment, and scrolls back up to that prompt's heart while
+        # Claude writes it.
+        plan_ahead = self._ai is not None and cfg["ai_prefer_prompts"]
         if patterns or self._ai is not None:
             self.state = "reading the profile"
-            texts = ui.read_profile(cfg["profile_read_scrolls"])
+            texts = ui.read_profile(cfg["profile_read_scrolls"], scroll_back=not plan_ahead)
             hit = self._find_keyword(patterns, texts)
             if hit:
                 self._skip(ui, dry, f"profile mentions '{hit}'")
                 return
 
         self.state = "looking at a profile"
-        prefer_prompts = self._ai is not None and cfg["ai_prefer_prompts"]
-        target = ui.pick_like_target(cfg["max_scrolls"], prefer_prompts=prefer_prompts)
+        target, label, pending = None, "", None
+        prompts = ui.prompts(texts) if plan_ahead else []
+        if prompts:
+            label = random.choice(prompts)
+            pending = self._ai_pool.submit(self._ai_comment, label, texts)
+            target = ui.find_like_for(label, ui.last_read_scrolls + 2)
+            if target is None:
+                pending = None  # its comment would answer a prompt we're not liking
+                self._log("Couldn't find the heart for the chosen prompt; picking another.")
+        elif plan_ahead:
+            ui.scroll_back(ui.last_read_scrolls)
         if target is None:
-            self._log("No like button found on this profile.")
-            self._skip(ui, dry, "no like button")
-            return
-        label = ui.describe(target)
-        comment = self._ai_comment(label, texts) or comments.pick()
+            target = ui.pick_like_target(cfg["max_scrolls"], prefer_prompts=plan_ahead)
+            if target is None:
+                self._log("No like button found on this profile.")
+                self._skip(ui, dry, "no like button")
+                return
+            label = ui.describe(target)
 
+        def get_comment() -> str:
+            if pending is None:
+                return self._ai_comment(label, texts) or comments.pick()
+            self.state = "waiting for the AI comment"
+            try:
+                return pending.result() or comments.pick()
+            except Exception as exc:
+                self._log(f"AI comment failed ({exc}); using comments.txt.")
+                return comments.pick()
+
+        if cfg["mode"] == "auto" and not dry:
+            # Open the comment box while the comment is still being written.
+            self.state = "opening the like sheet"
+            if not ui.open_like(target):
+                self._failures += 1
+                self._log("The like sheet didn't open; trying again next round.")
+                return
+            self._failures = 0
+            comment = get_comment()
+            self.state = "writing comment"
+            ui.write_comment(comment)
+            self._send(ui, label, comment)
+            return
+
+        comment = get_comment()
         if cfg["mode"] == "approve":
             decision = self._ask_approval(ui, label, comment)
             if decision is None:
@@ -343,7 +384,9 @@ class Bot:
             return
         self._failures = 0
         ui.write_comment(comment)
+        self._send(ui, label, comment)
 
+    def _send(self, ui, label: str, comment: str) -> None:
         if ui.send():
             self._log(f"Sent like #{self._bump_sent()} on '{label}': “{comment}”")
         else:
@@ -368,7 +411,6 @@ class Bot:
             return None
         import anthropic
 
-        self.state = "writing an AI comment"
         try:
             comment = self._ai.write(label, texts or [label])
         except anthropic.AuthenticationError:

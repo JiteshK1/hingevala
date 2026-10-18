@@ -12,6 +12,7 @@ class HingeUI:
         self.dev = device
         self.sel = selectors
         self.package = selectors["package"]
+        self.last_read_scrolls = 0
 
     def detect(self, wait: float = 8.0) -> Tuple[str, str]:
         """Return (screen, detail). screen is one of:
@@ -98,10 +99,11 @@ class HingeUI:
                 usable.append(button)
         return usable
 
-    def read_profile(self, max_scrolls: int) -> List[str]:
+    def read_profile(self, max_scrolls: int, scroll_back: bool = True) -> List[str]:
         """Every piece of profile text (name, pronouns, prompts, details), read while
-        scrolling to the bottom of the profile, then scrolls back to the top. Hinge's own
-        buttons, filter chips and tab bar are left out, as is anything outside Hinge."""
+        scrolling to the bottom of the profile. Hinge's own buttons, filter chips and tab
+        bar are left out, as is anything outside Hinge. Scrolls back to the top unless
+        scroll_back is False; last_read_scrolls says how far down it went."""
         chrome = [re.compile(p) for p in self.sel["discover"]["chrome_descriptions"]]
         seen: List[str] = []
         scrolls = 0
@@ -120,27 +122,54 @@ class HingeUI:
                 break
             self.dev.swipe_up()
             scrolls += 1
-            time.sleep(random.uniform(0.8, 1.5))
-        for _ in range(scrolls):
-            self.dev.swipe_down()
-            time.sleep(random.uniform(0.4, 0.8))
-        time.sleep(0.8)
+            time.sleep(random.uniform(0.5, 0.9))
+        self.last_read_scrolls = scrolls
+        if scroll_back:
+            self.scroll_back(scrolls)
         return seen
+
+    def scroll_back(self, swipes: int) -> None:
+        for _ in range(swipes):
+            self.dev.swipe_down()
+            time.sleep(random.uniform(0.3, 0.6))
+        time.sleep(0.5)
+
+    def prompts(self, texts: List[str]) -> List[str]:
+        """The prompt-and-answer entries among read_profile() texts."""
+        return [t for t in texts if re.match(r"(?i)^prompt: ", t)]
+
+    def find_like_for(self, item: str, max_swipes: int):
+        """Scroll up from where the profile is now until the like button for `item`
+        (a description from read_profile) is fully on screen. None if it never shows up."""
+        patterns = self.sel["discover"]["profile_item_patterns"]
+        for swipe in range(max_swipes + 1):
+            buttons = self._usable_like_buttons()
+            items = self.dev.described_nodes(patterns)
+            for button in buttons:
+                # read_profile() strips whitespace; Hinge's descriptions sometimes end in a space.
+                if self.describe(button, items).strip() == item.strip():
+                    return button
+            if swipe < max_swipes:
+                self.dev.swipe_down()
+                time.sleep(random.uniform(0.4, 0.7))
+        return None
 
     def profile_items(self) -> List[str]:
         """Descriptions of the photos and prompts currently on screen."""
         patterns = self.sel["discover"]["profile_item_patterns"]
         return [desc for desc, _ in self.dev.described_nodes(patterns)]
 
-    def describe(self, button) -> str:
+    def describe(self, button, items=None) -> str:
         """What a like button is attached to: the smallest photo/prompt area containing it,
-        preferring the kind the button names ('Like photo' -> a photo)."""
+        preferring the kind the button names ('Like photo' -> a photo). `items` reuses a
+        described_nodes() result instead of reading the screen again."""
         info = button.info
         b = info["bounds"]
         x, y = (b["left"] + b["right"]) // 2, (b["top"] + b["bottom"]) // 2
         button_desc = info.get("contentDescription") or "like button"
         kind = button_desc.split()[-1].lower()  # 'photo', 'prompt', 'video', ...
-        items = self.dev.described_nodes(self.sel["discover"]["profile_item_patterns"])
+        if items is None:
+            items = self.dev.described_nodes(self.sel["discover"]["profile_item_patterns"])
         containing = [
             ((right - left) * (bottom - top), desc)
             for desc, (left, top, right, bottom) in items

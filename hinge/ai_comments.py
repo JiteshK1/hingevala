@@ -30,12 +30,18 @@ something else in her profile instead, or keep it light and general.
 # Hinge cuts comments off past this; keep a margin.
 MAX_CHARS = 150
 
+# Models that accept server-side refusal fallbacks (Haiku has none; a refusal there
+# just means comments.txt is used for that like).
+FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
+
 
 class AICommenter:
     def __init__(self, model: str, style: str = ""):
         self.model = model
         self.style = style.strip()
-        self.client = anthropic.Anthropic(max_retries=2, timeout=60.0)
+        # Short timeout and one retry: a slow reply costs a like's worth of waiting, and
+        # comments.txt is always there instead.
+        self.client = anthropic.Anthropic(max_retries=1, timeout=20.0)
 
     def write(self, target: str, profile_texts: List[str]) -> Optional[str]:
         """A comment for the liked item, or None (the caller then uses comments.txt)."""
@@ -43,16 +49,18 @@ class AICommenter:
         request = f"Item being liked:\n{target}\n\nRest of her profile:\n{profile}"
         if self.style:
             request += f"\n\nExtra style notes from me: {self.style}"
+        extra = {}
+        if self.model in FALLBACK_MODELS:
+            # If a safety check declines the request, the API retries it on a fallback
+            # model instead of returning a refusal.
+            extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
         response = self.client.beta.messages.create(
             model=self.model,
             max_tokens=4000,
             output_config={"effort": "low"},
-            # If a safety check declines the request, the API retries it on a fallback
-            # model instead of returning a refusal.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
             system=SYSTEM,
             messages=[{"role": "user", "content": request}],
+            **extra,
         )
         if response.stop_reason in ("refusal", "max_tokens"):
             return None
