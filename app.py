@@ -22,6 +22,7 @@ class Options(BaseModel):
     dry_run: Optional[bool] = None
     mode: Optional[str] = None
     daily_cap: Optional[int] = None
+    ai_comments: Optional[bool] = None
 
 
 class Decision(BaseModel):
@@ -57,7 +58,9 @@ def options(opts: Options):
         raise HTTPException(400, "mode must be 'approve' or 'auto'")
     if opts.daily_cap is not None and opts.daily_cap < 0:
         raise HTTPException(400, "daily_cap must be 0 (no limit) or more")
-    bot.update_options(dry_run=opts.dry_run, mode=opts.mode, daily_cap=opts.daily_cap)
+    bot.update_options(
+        dry_run=opts.dry_run, mode=opts.mode, daily_cap=opts.daily_cap, ai_comments=opts.ai_comments
+    )
     return bot.status()
 
 

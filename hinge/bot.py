@@ -61,6 +61,7 @@ class Bot:
         self._avd = ""
         self._emulator_restarts: List[float] = []
         self._ai = None
+        self._ai_enabled = False  # the ai_comments setting self._ai was last built for
         self._ai_paused_until = 0.0
         self._ai_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-comment")
         self.log_lines = deque(maxlen=300)
@@ -119,6 +120,7 @@ class Bot:
             "state": self.state,
             "mode": self.config["mode"],
             "dry_run": self.config["dry_run"],
+            "ai_comments": self.config["ai_comments"],
             "daily_cap": self.config["daily_cap"],
             "sent_today": self._sent_today(),
             "dry_runs": self.dry_runs,
@@ -140,6 +142,7 @@ class Bot:
             dev, ui = self._connect()
             comments = CommentPicker(self.root / "comments.txt", self.config["comment_no_repeat"])
             self._ai = self._make_ai_commenter()
+            self._ai_enabled = self.config["ai_comments"]
             self._log(
                 f"Started (mode={self.config['mode']}, dry_run={self.config['dry_run']}, "
                 f"daily_cap={self.config['daily_cap']})"
@@ -298,6 +301,14 @@ class Bot:
         cfg = self.config
         dry = cfg["dry_run"]
 
+        if cfg["ai_comments"] != self._ai_enabled:
+            # Switched on the control page while running.
+            self._ai_enabled = cfg["ai_comments"]
+            self._ai_paused_until = 0.0
+            self._ai = self._make_ai_commenter()
+            if self._ai is None and not cfg["ai_comments"]:
+                self._log("AI comments off: using comments.txt and skipping the full profile read.")
+
         if random.random() < cfg["skip_probability"]:
             self._skip(ui, dry, "random skip")
             return
@@ -308,13 +319,17 @@ class Bot:
         # there, starts the comment, and scrolls back up to that prompt's heart while
         # Claude writes it.
         plan_ahead = self._ai is not None and cfg["ai_prefer_prompts"]
-        if patterns or self._ai is not None:
+        if self._ai is not None:
             self.state = "reading the profile"
             texts = ui.read_profile(cfg["profile_read_scrolls"], scroll_back=not plan_ahead)
-            hit = self._find_keyword(patterns, texts)
-            if hit:
-                self._skip(ui, dry, f"profile mentions '{hit}'")
-                return
+        elif patterns:
+            # Fast mode: no extra scrolling, only the first screen (name, pronouns, first
+            # photo and prompt) is checked here, and the screen with the heart below.
+            texts = ui.read_profile(0, scroll_back=False)
+        hit = self._find_keyword(patterns, texts)
+        if hit:
+            self._skip(ui, dry, f"profile mentions '{hit}'")
+            return
 
         self.state = "looking at a profile"
         target, label, pending = None, "", None
@@ -335,6 +350,11 @@ class Bot:
                 self._skip(ui, dry, "no like button")
                 return
             label = ui.describe(target)
+            if self._ai is None and patterns:
+                hit = self._find_keyword(patterns, ui.read_profile(0, scroll_back=False))
+                if hit:
+                    self._skip(ui, dry, f"profile mentions '{hit}'")
+                    return
 
         def get_comment() -> str:
             if pending is None:

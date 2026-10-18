@@ -60,6 +60,7 @@
       <button id="start" class="primary">Start</button>
       <button id="stop" class="danger">Stop</button>
       <label><input type="checkbox" id="dry_run"> Dry run</label>
+      <label title="On: reads the whole profile and has Claude write each comment. Off: comments.txt, faster swiping."><input type="checkbox" id="ai_comments"> AI comments</label>
       <label>Mode
         <select id="mode">
           <option value="approve">Approve each</option>
@@ -114,6 +115,7 @@ function render(s) {
   $("stop").disabled = !s.running;
   if (document.activeElement !== $("daily_cap")) $("daily_cap").value = s.daily_cap;
   $("dry_run").checked = s.dry_run;
+  $("ai_comments").checked = s.ai_comments;
   $("mode").value = s.mode;
   $("sent").textContent = s.daily_cap ? `${s.sent_today}/${s.daily_cap}` : `${s.sent_today}`;
   $("dry_runs").textContent = s.dry_runs;
@@ -147,6 +149,7 @@ async function refresh() {
 $("start").onclick = () => api("/api/start", {}).then(refresh);
 $("stop").onclick = () => api("/api/stop", {}).then(refresh);
 $("dry_run").onchange = (e) => api("/api/options", { dry_run: e.target.checked }).then(render);
+$("ai_comments").onchange = (e) => api("/api/options", { ai_comments: e.target.checked }).then(render);
 $("mode").onchange = (e) => api("/api/options", { mode: e.target.value }).then(render);
 $("daily_cap").onchange = (e) => api("/api/options", { daily_cap: Number(e.target.value) }).then(render).catch(refresh);
 

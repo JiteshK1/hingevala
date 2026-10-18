@@ -247,6 +247,8 @@ Stop it with the **Stop** button. Press `Ctrl+C` in the terminal to shut down th
   export ANTHROPIC_API_KEY=sk-ant-...
   .venv/bin/python app.py
   ```
+  You can also switch this with the **AI comments** checkbox on the control page, even while it runs. Unticked, the bot swipes faster: it doesn't scroll through the whole profile, uses `comments.txt`, and checks `skip_keywords` only against the first screen and the screen with the heart it likes.
+
   The bot sends the profile's text (prompts, name, details; never photos) to Claude, which writes a comment answering the prompt being liked. The log shows each one as `AI comment for ...`. If the key is missing or the API fails, it uses `comments.txt` instead.
 - **Skip rules**: list words or phrases in `skip_keywords`. Before liking, the bot scrolls through the profile, reads its text and skips it if any entry appears. Only text counts: Hinge blocks screenshots, so the bot can't see photos. Whole-word matching means `he/him` won't match `she/her`, but a bare `he` would match any prompt containing "he", so prefer specific phrases.
 
