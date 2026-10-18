@@ -20,10 +20,25 @@
   "comment_no_repeat": 40,
   "approval_timeout_seconds": 600,
   "max_restarts_in_a_row": 3,
-  "skip_keywords": [],
+  "skip_keywords": [
+    "he/him",
+    "he/him/his",
+    "he/they",
+    "curvy",
+    "chubby",
+    "plus size",
+    "plus-size",
+    "bbw",
+    "full figured",
+    "thicc"
+  ],
   "profile_read_scrolls": 8,
   "auto_restart_emulator": true,
   "avd_name": "Pixel_7",
   "emulator_boot_timeout_seconds": 300,
-  "max_emulator_restarts_per_hour": 5
+  "max_emulator_restarts_per_hour": 5,
+  "ai_comments": true,
+  "ai_model": "claude-opus-5-5",
+  "ai_style": "",
+  "ai_prefer_prompts": true
 }

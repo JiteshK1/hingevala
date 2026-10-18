@@ -34,6 +34,10 @@ DEFAULT_CONFIG = {
     "avd_name": "",
     "emulator_boot_timeout_seconds": 300,
     "max_emulator_restarts_per_hour": 5,
+    "ai_comments": False,
+    "ai_model": "claude-opus-5-5",
+    "ai_style": "",
+    "ai_prefer_prompts": True,
 }
 
 
@@ -55,6 +59,8 @@ class Bot:
         self._serial = ""
         self._avd = ""
         self._emulator_restarts: List[float] = []
+        self._ai = None
+        self._ai_paused_until = 0.0
         self.log_lines = deque(maxlen=300)
 
         self._stop = threading.Event()
@@ -131,6 +137,7 @@ class Bot:
                     return
             dev, ui = self._connect()
             comments = CommentPicker(self.root / "comments.txt", self.config["comment_no_repeat"])
+            self._ai = self._make_ai_commenter()
             self._log(
                 f"Started (mode={self.config['mode']}, dry_run={self.config['dry_run']}, "
                 f"daily_cap={self.config['daily_cap']})"
@@ -294,7 +301,8 @@ class Bot:
             return
 
         patterns = self._keyword_patterns()
-        if patterns:
+        texts: List[str] = []
+        if patterns or self._ai is not None:
             self.state = "reading the profile"
             texts = ui.read_profile(cfg["profile_read_scrolls"])
             hit = self._find_keyword(patterns, texts)
@@ -303,13 +311,14 @@ class Bot:
                 return
 
         self.state = "looking at a profile"
-        target = ui.pick_like_target(cfg["max_scrolls"])
+        prefer_prompts = self._ai is not None and cfg["ai_prefer_prompts"]
+        target = ui.pick_like_target(cfg["max_scrolls"], prefer_prompts=prefer_prompts)
         if target is None:
             self._log("No like button found on this profile.")
             self._skip(ui, dry, "no like button")
             return
         label = ui.describe(target)
-        comment = comments.pick()
+        comment = self._ai_comment(label, texts) or comments.pick()
 
         if cfg["mode"] == "approve":
             decision = self._ask_approval(ui, label, comment)
@@ -339,6 +348,73 @@ class Bot:
             self._log(f"Sent like #{self._bump_sent()} on '{label}': “{comment}”")
         else:
             raise RuntimeError("Tapped Send, but the comment box stayed open")
+
+    def _make_ai_commenter(self):
+        if not self.config["ai_comments"]:
+            return None
+        try:
+            from .ai_comments import AICommenter
+
+            ai = AICommenter(self.config["ai_model"], self.config["ai_style"])
+        except Exception as exc:
+            self._log(f"AI comments are off: {exc}. Using comments.txt.")
+            return None
+        self._log(f"AI comments on ({self.config['ai_model']}).")
+        return ai
+
+    def _ai_comment(self, label: str, texts: List[str]) -> Optional[str]:
+        """A comment written for this profile, or None to use comments.txt."""
+        if self._ai is None or time.time() < self._ai_paused_until:
+            return None
+        import anthropic
+
+        self.state = "writing an AI comment"
+        try:
+            comment = self._ai.write(label, texts or [label])
+        except anthropic.AuthenticationError:
+            self._log("The Anthropic API key was rejected; AI comments are off until restart.")
+            self._ai = None
+            return None
+        except anthropic.PermissionDeniedError as exc:
+            self._log(f"Anthropic API refused the key ({exc.message}); AI comments are off until restart.")
+            self._ai = None
+            return None
+        except anthropic.RateLimitError as exc:
+            # Wait as long as the API asks (at least a minute) before trying again;
+            # comments.txt covers the likes in between.
+            try:
+                wait = max(60, int(float(exc.response.headers.get("retry-after", "60"))))
+            except ValueError:
+                wait = 60
+            self._ai_paused_until = time.time() + wait
+            self._log(f"Anthropic API rate limit; using comments.txt for the next {wait // 60} min.")
+            return None
+        except anthropic.BadRequestError as exc:
+            if "credit balance" in str(exc.message).lower():
+                self._log("Anthropic credit has run out; using comments.txt until restart.")
+                self._ai = None
+            else:
+                self._log(f"Anthropic API rejected the request ({exc.message}); using comments.txt this time.")
+            return None
+        except anthropic.APIStatusError as exc:
+            self._log(f"Anthropic API error {exc.status_code}; using comments.txt this time.")
+            return None
+        except anthropic.APIConnectionError:
+            self._log("Couldn't reach the Anthropic API; using comments.txt this time.")
+            return None
+        except anthropic.AnthropicError as exc:
+            # Raised before any request is sent: usually no API key in the environment.
+            self._log(
+                f"AI comments are off until restart ({exc}). "
+                "Start app.py with ANTHROPIC_API_KEY set to use them."
+            )
+            self._ai = None
+            return None
+        if comment is None:
+            self._log("AI comment came back unusable; using comments.txt this time.")
+            return None
+        self._log(f"AI comment for '{label}': “{comment}”")
+        return comment
 
     def _ask_approval(self, ui, label: str, comment: str) -> Optional[Tuple[str, str]]:
         # Hinge blocks screenshots, so the approval card shows the profile as text.

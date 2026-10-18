@@ -30,6 +30,9 @@ If the emulator crashes (`device 'emulator-5554' not found`), the bot closes wha
   - `skip_probability`: share of profiles skipped at random
   - `skip_keywords`: words or phrases that make the bot skip a profile, e.g. `["he/him", "smoke regularly"]`. Matched as whole words, ignoring case, against the profile's text (name, pronouns, prompts, details). Empty list = off
   - `profile_read_scrolls`: how far down a profile the bot reads before checking `skip_keywords`
+  - `ai_comments`: write each comment with Claude, answering the prompt being liked (falls back to `comments.txt` on any error). Needs `ANTHROPIC_API_KEY` set in the terminal that runs `app.py`
+  - `ai_model`, `ai_style`: the Claude model, and optional extra style notes, e.g. `"tease a little, ask questions"`
+  - `ai_prefer_prompts`: with AI comments on, like a prompt rather than a photo when both are on screen
   - `active_hours`: hours the bot may run, as `[start, end)`
   - `mode`: `approve` or `auto`
   - `dry_run`: when true, nothing is sent or skipped

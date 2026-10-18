@@ -55,8 +55,10 @@ class HingeUI:
         else:
             self.dev.back()
 
-    def pick_like_target(self, max_scrolls: int):
-        """Scroll a random amount down the profile and pick a random visible like button."""
+    def pick_like_target(self, max_scrolls: int, prefer_prompts: bool = False):
+        """Scroll a random amount down the profile and pick a random visible like button.
+        With prefer_prompts, a prompt's heart wins over a photo's when both are visible
+        (a comment can answer a prompt; it can't see a photo)."""
         for _ in range(random.randint(0, max_scrolls)):
             self.dev.swipe_up()
             time.sleep(random.uniform(0.8, 1.8))
@@ -65,6 +67,9 @@ class HingeUI:
             self.dev.swipe_up()
             time.sleep(1.2)
             buttons = self._usable_like_buttons()
+        if prefer_prompts:
+            prompts = [b for b in buttons if "prompt" in b.info["contentDescription"].lower()]
+            buttons = prompts or buttons
         return random.choice(buttons) if buttons else None
 
     def _usable_like_buttons(self) -> list:

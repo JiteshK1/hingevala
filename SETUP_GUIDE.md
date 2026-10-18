@@ -126,6 +126,10 @@ Safety details built in:
 | `skip_probability` | Share of profiles skipped at random | `0.25` |
 | `skip_keywords` | Skip a profile whose text contains any of these (whole words, any case). `[]` = off | `["he/him", "smoke regularly"]` |
 | `profile_read_scrolls` | How many scrolls down a profile to read before checking `skip_keywords` | `8` |
+| `ai_comments` | Write each comment with Claude from the profile's prompts; falls back to `comments.txt` on any error | `true` |
+| `ai_model` | Claude model for comments | `"claude-opus-5-5"` |
+| `ai_style` | Extra style notes for the comments | `"tease a little"` |
+| `ai_prefer_prompts` | With AI comments, like a prompt rather than a photo when both are visible | `true` |
 | `active_hours` | Hours it may run, `[start, end)`, 24h clock | `[8, 24]` |
 | `max_scrolls` | Max random scrolls down a profile before picking a heart | `3` |
 | `comment_no_repeat` | Don't reuse any of the last N comments | `40` |
@@ -238,6 +242,12 @@ Stop it with the **Stop** button. Press `Ctrl+C` in the terminal to shut down th
 
 - **Comments**: edit `comments.txt`, one per line. Lines starting with `#` are ignored. A comment may land on a photo or a prompt, so keep them generic.
 - **Limits**: edit `config.json` while the bot is stopped (it's re-read on Start).
+- **AI comments**: set `ai_comments` to `true` and start the control page with your Anthropic API key (from https://platform.claude.com, *API Keys*; console credits are used automatically):
+  ```bash
+  export ANTHROPIC_API_KEY=sk-ant-...
+  .venv/bin/python app.py
+  ```
+  The bot sends the profile's text (prompts, name, details; never photos) to Claude, which writes a comment answering the prompt being liked. The log shows each one as `AI comment for ...`. If the key is missing or the API fails, it uses `comments.txt` instead.
 - **Skip rules**: list words or phrases in `skip_keywords`. Before liking, the bot scrolls through the profile, reads its text and skips it if any entry appears. Only text counts: Hinge blocks screenshots, so the bot can't see photos. Whole-word matching means `he/him` won't match `she/her`, but a bare `he` would match any prompt containing "he", so prefer specific phrases.
 
 ### When Hinge updates and the bot stops finding buttons
