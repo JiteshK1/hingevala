@@ -9,7 +9,12 @@
     "skip_button": [
       {"className": "android.widget.Button", "descriptionMatches": "(?i)^skip .+"}
     ],
-    "profile_item_patterns": ["^Prompt: ", "'s (photo|video)$"]
+    "profile_item_patterns": ["^Prompt: ", "'s (photo|video)$"],
+    "_note_chrome": "Descriptions on the Discover screen that belong to Hinge itself, not the profile. Left out of the text skip_keywords is checked against, so a keyword like 'height' can't match the 'Height filter options' chip.",
+    "chrome_descriptions": [
+      "(?i).* filter(,.*| options)$",
+      "^(Discover|Standouts|Likes You|Matches|Profile Hub)$"
+    ]
   },
   "nav": {
     "_note": "Bottom tab bar. The layout doesn't say which tab is selected, so the bot just taps Discover when it isn't on the feed.",

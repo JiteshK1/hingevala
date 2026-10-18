@@ -1,5 +1,6 @@
 """Knows what Hinge's screens look like (from selectors.json) and how to act on them."""
 import random
+import re
 import time
 from typing import List, Tuple
 
@@ -91,6 +92,35 @@ class HingeUI:
             if fully_visible and b["bottom"] <= content_bottom:
                 usable.append(button)
         return usable
+
+    def read_profile(self, max_scrolls: int) -> List[str]:
+        """Every piece of profile text (name, pronouns, prompts, details), read while
+        scrolling to the bottom of the profile, then scrolls back to the top. Hinge's own
+        buttons, filter chips and tab bar are left out, as is anything outside Hinge."""
+        chrome = [re.compile(p) for p in self.sel["discover"]["chrome_descriptions"]]
+        seen: List[str] = []
+        scrolls = 0
+        while True:
+            new = 0
+            for node in self.dev.snapshot():
+                if node.get("package") != self.package or node.get("clickable") == "true":
+                    continue
+                for value in (node.get("text") or "", node.get("content-desc") or ""):
+                    value = value.strip()
+                    if value and value not in seen and not any(c.fullmatch(value) for c in chrome):
+                        seen.append(value)
+                        new += 1
+            # Nothing new after a scroll means the end of the profile.
+            if scrolls >= max_scrolls or (scrolls and not new):
+                break
+            self.dev.swipe_up()
+            scrolls += 1
+            time.sleep(random.uniform(0.8, 1.5))
+        for _ in range(scrolls):
+            self.dev.swipe_down()
+            time.sleep(random.uniform(0.4, 0.8))
+        time.sleep(0.8)
+        return seen
 
     def profile_items(self) -> List[str]:
         """Descriptions of the photos and prompts currently on screen."""

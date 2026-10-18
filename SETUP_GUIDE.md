@@ -63,11 +63,16 @@ flowchart TD
     Det -->|discover| P[Handle profile]
     Det -->|popup e.g. It's a match| Pop[Dismiss popup] --> H
     Det -->|paywall / verification / out of profiles| Stop
-    Det -->|comment box left open, Hinge closed, unknown screen, error| R[Force-stop and reopen Hinge<br>up to max_restarts_in_a_row]
+    Det -->|comment box left open, Hinge closed, unknown screen, error| Emu{Emulator answering?}
+    Emu -- yes --> R[Force-stop and reopen Hinge<br>up to max_restarts_in_a_row]
+    Emu -- no --> CB[Close the emulator, cold-boot it,<br>reopen Hinge<br>up to max_emulator_restarts_per_hour]
+    CB --> H
     R --> H
     P --> Rnd{Random skip?<br>skip_probability}
     Rnd -- yes --> Skip[Tap Skip] --> Wait
-    Rnd -- no --> Pick[Scroll a random amount,<br>pick a random photo or prompt heart]
+    Rnd -- no --> Kw{Profile text has a<br>skip_keywords match?}
+    Kw -- yes --> Skip
+    Kw -- no --> Pick[Scroll a random amount,<br>pick a random photo or prompt heart]
     Pick --> Mode{mode}
     Mode -- approve --> Ask[Show it on the control page,<br>wait for Send / Skip]
     Mode -- auto --> Dry
@@ -81,7 +86,7 @@ Safety details built in:
 - **Human-like input**: taps land at a random point inside the button, swipes vary in position and speed, and the wait between actions is random.
 - **Never sends an empty comment**: after typing, it checks that the button changed to *"Send like with message"* before tapping Send.
 - **Never sends twice**: it taps Send again only while the like sheet is still open.
-- **Self-healing**: if something goes wrong, it force-stops Hinge and opens it fresh (your login is untouched). After `max_restarts_in_a_row` restarts in a row, it stops.
+- **Self-healing**: if something goes wrong, it force-stops Hinge and opens it fresh (your login is untouched). After `max_restarts_in_a_row` restarts in a row, it stops. If the emulator itself crashed or stopped answering, it closes it (force-killing it if needed), cold-boots it and reopens Hinge, up to `max_emulator_restarts_per_hour` times an hour.
 - **Daily counter** is saved in `data/state.json` and resets each day.
 
 ### The control page
@@ -119,11 +124,17 @@ Safety details built in:
 | `delay_seconds` | Random wait between actions `[min, max]` | `[30, 120]` |
 | `dry_run_delay_seconds` | Same, during dry runs | `[5, 10]` |
 | `skip_probability` | Share of profiles skipped at random | `0.25` |
+| `skip_keywords` | Skip a profile whose text contains any of these (whole words, any case). `[]` = off | `["he/him", "smoke regularly"]` |
+| `profile_read_scrolls` | How many scrolls down a profile to read before checking `skip_keywords` | `8` |
 | `active_hours` | Hours it may run, `[start, end)`, 24h clock | `[8, 24]` |
 | `max_scrolls` | Max random scrolls down a profile before picking a heart | `3` |
 | `comment_no_repeat` | Don't reuse any of the last N comments | `40` |
 | `approval_timeout_seconds` | How long approve mode waits for you | `600` |
 | `max_restarts_in_a_row` | How many times Hinge may be reopened in a row before the bot stops | `3` |
+| `auto_restart_emulator` | Cold-boot the emulator when it crashes or stops answering, instead of stopping | `true` |
+| `avd_name` | Emulator to cold-boot (`emulator -list-avds`). `""` = the one that was running | `"Pixel_7"` |
+| `emulator_boot_timeout_seconds` | How long to wait for the emulator to boot | `300` |
+| `max_emulator_restarts_per_hour` | Emulator restarts allowed per hour before the bot stops | `5` |
 
 Mode, dry run and daily cap can also be changed on the control page, which saves them back to `config.json`.
 
@@ -227,6 +238,7 @@ Stop it with the **Stop** button. Press `Ctrl+C` in the terminal to shut down th
 
 - **Comments**: edit `comments.txt`, one per line. Lines starting with `#` are ignored. A comment may land on a photo or a prompt, so keep them generic.
 - **Limits**: edit `config.json` while the bot is stopped (it's re-read on Start).
+- **Skip rules**: list words or phrases in `skip_keywords`. Before liking, the bot scrolls through the profile, reads its text and skips it if any entry appears. Only text counts: Hinge blocks screenshots, so the bot can't see photos. Whole-word matching means `he/him` won't match `she/her`, but a bare `he` would match any prompt containing "he", so prefer specific phrases.
 
 ### When Hinge updates and the bot stops finding buttons
 
@@ -250,7 +262,7 @@ Unknown screens the bot hits while running are saved as `data/unknown-<time>.xml
 | Problem | Fix |
 |---|---|
 | `adb devices` lists nothing | Start the emulator first. Then `adb kill-server && adb start-server` |
-| `device offline` in the log | The emulator went to sleep or restarted. Restart it, open Hinge, press Start again |
+| `device offline` or `device ... not found` in the log | The emulator crashed or went to sleep. The bot cold-boots it and carries on; if `auto_restart_emulator` is off, restart it, open Hinge and press Start again. The boot's output is in `data/emulator.log` |
 | Several emulators running | Set `device_serial` in `config.json` (for example `"emulator-5554"`) |
 | Log says *"Outside active hours"* | Change `active_hours` in `config.json`, for example `[0, 24]` |
 | Log says *"Daily cap reached."* | Raise `daily_cap` or wait until tomorrow |

@@ -1,6 +1,7 @@
 """The background loop: read the screen, decide, act, wait. Runs until Stop is pressed."""
 import json
 import random
+import re
 import threading
 import time
 import traceback
@@ -8,8 +9,9 @@ import uuid
 from collections import deque
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
+from . import emulator
 from .comments import CommentPicker
 
 # Used for any setting missing from config.json, so an older or hand-edited file still works.
@@ -26,6 +28,12 @@ DEFAULT_CONFIG = {
     "comment_no_repeat": 10,
     "approval_timeout_seconds": 600,
     "max_restarts_in_a_row": 3,
+    "skip_keywords": [],
+    "profile_read_scrolls": 8,
+    "auto_restart_emulator": True,
+    "avd_name": "",
+    "emulator_boot_timeout_seconds": 300,
+    "max_emulator_restarts_per_hour": 5,
 }
 
 
@@ -44,6 +52,9 @@ class Bot:
         self.next_action_at: Optional[float] = None
         self.dry_runs = 0
         self._failures = 0
+        self._serial = ""
+        self._avd = ""
+        self._emulator_restarts: List[float] = []
         self.log_lines = deque(maxlen=300)
 
         self._stop = threading.Event()
@@ -112,13 +123,13 @@ class Bot:
 
     def _run(self) -> None:
         try:
-            # Imported here so the control page still starts when no device is attached.
-            from .device import Device
-            from .ui import HingeUI
-
             self.state = "connecting to emulator"
-            dev = Device(self.config.get("device_serial", ""))
-            ui = HingeUI(dev, self._load_json(self.root / "selectors.json"))
+            self._serial = self.config["device_serial"] or emulator.first_emulator_serial()
+            self._avd = self.config["avd_name"] or emulator.avd_name(self._serial)
+            if not emulator.healthy(self._serial):
+                if not self._restart_emulator("The emulator isn't running."):
+                    return
+            dev, ui = self._connect()
             comments = CommentPicker(self.root / "comments.txt", self.config["comment_no_repeat"])
             self._log(
                 f"Started (mode={self.config['mode']}, dry_run={self.config['dry_run']}, "
@@ -189,6 +200,19 @@ class Bot:
 
                 if problem is None or self._stop.is_set():
                     continue
+                if self.config["auto_restart_emulator"] and not emulator.healthy(self._serial):
+                    # Reopening Hinge can't help when the emulator itself crashed or froze.
+                    if not self._restart_emulator(f"{problem} The emulator isn't answering."):
+                        break
+                    dev, ui = self._connect()
+                    restarts = 0
+                    tried_discover_tab = False
+                    self._log("Opening Hinge.")
+                    try:
+                        ui.restart_app()
+                    except Exception as exc:
+                        self._log(f"Couldn't open Hinge: {exc}.")
+                    continue
                 limit = self.config["max_restarts_in_a_row"]
                 if restarts >= limit:
                     self._log(f"{problem} Already restarted Hinge {restarts} times in a row; stopping.")
@@ -197,7 +221,11 @@ class Bot:
                 tried_discover_tab = False
                 self.state = "restarting Hinge"
                 self._log(f"{problem} Closing Hinge and opening it fresh ({restarts}/{limit}).")
-                ui.restart_app()
+                try:
+                    ui.restart_app()
+                except Exception as exc:
+                    # Usually the emulator going away mid-restart; the next round finds out.
+                    self._log(f"Couldn't reopen Hinge: {exc}.")
         except Exception as exc:
             self._log(f"Error: {exc}")
             with self.log_path.open("a", encoding="utf-8") as f:
@@ -208,6 +236,55 @@ class Bot:
             self.state = "stopped"
             self._log("Stopped.")
 
+    def _connect(self):
+        """Fresh connection to the emulator. Right after a boot uiautomator2's helper
+        may still be starting, so this retries for a while."""
+        # Imported here so the control page still starts when no device is attached.
+        from .device import Device
+        from .ui import HingeUI
+
+        for attempt in range(6):
+            try:
+                dev = Device(self._serial)
+                dev.foreground_package()
+                return dev, HingeUI(dev, self._load_json(self.root / "selectors.json"))
+            except Exception:
+                if attempt == 5 or self._stop.is_set():
+                    raise
+                self._stop.wait(10)
+
+    def _restart_emulator(self, problem: str) -> bool:
+        """Close the emulator (force-killing it if it's hung) and cold-boot it again,
+        as you would with Android Studio's "Cold Boot Now". True once it's back up."""
+        cfg = self.config
+        if not cfg["auto_restart_emulator"]:
+            self._log(f"{problem} auto_restart_emulator is off; stopping.")
+            return False
+        avd = self._avd or emulator.last_used_avd()
+        if not avd:
+            self._log(f"{problem} Don't know which emulator to start; set avd_name in config.json.")
+            return False
+        self._avd = avd
+        hour_ago = time.time() - 3600
+        self._emulator_restarts = [t for t in self._emulator_restarts if t > hour_ago]
+        limit = cfg["max_emulator_restarts_per_hour"]
+        if len(self._emulator_restarts) >= limit:
+            self._log(f"{problem} Already restarted the emulator {limit} times this hour; stopping.")
+            return False
+        self._emulator_restarts.append(time.time())
+        self.state = "restarting the emulator"
+        self._log(
+            f"{problem} Closing the emulator and cold-booting {avd} "
+            f"({len(self._emulator_restarts)}/{limit} this hour)."
+        )
+        emulator.kill(self._serial, avd, self._log)
+        if self._stop.is_set():
+            return False
+        return emulator.start(
+            self._serial, avd, cfg["emulator_boot_timeout_seconds"], self._log,
+            self.data / "emulator.log", stop=self._stop,
+        )
+
     def _handle_profile(self, ui, dev, comments: CommentPicker) -> None:
         cfg = self.config
         dry = cfg["dry_run"]
@@ -215,6 +292,15 @@ class Bot:
         if random.random() < cfg["skip_probability"]:
             self._skip(ui, dry, "random skip")
             return
+
+        patterns = self._keyword_patterns()
+        if patterns:
+            self.state = "reading the profile"
+            texts = ui.read_profile(cfg["profile_read_scrolls"])
+            hit = self._find_keyword(patterns, texts)
+            if hit:
+                self._skip(ui, dry, f"profile mentions '{hit}'")
+                return
 
         self.state = "looking at a profile"
         target = ui.pick_like_target(cfg["max_scrolls"])
@@ -283,6 +369,22 @@ class Bot:
         else:
             ui.skip()
             self._log(f"Skipped ({reason}).")
+
+    def _keyword_patterns(self) -> List[Tuple[str, re.Pattern]]:
+        """skip_keywords as whole-word, case-insensitive patterns, so 'he/him' doesn't
+        match 'she/her' and 'gym' doesn't match 'gymnast'."""
+        return [
+            (word, re.compile(rf"(?<!\w){re.escape(word.strip())}(?!\w)", re.IGNORECASE))
+            for word in self.config["skip_keywords"]
+            if word.strip()
+        ]
+
+    @staticmethod
+    def _find_keyword(patterns, texts: List[str]) -> Optional[str]:
+        for word, pattern in patterns:
+            if any(pattern.search(text) for text in texts):
+                return word
+        return None
 
     def _pause(self) -> None:
         low, high = self.config["dry_run_delay_seconds" if self.config["dry_run"] else "delay_seconds"]

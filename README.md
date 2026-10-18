@@ -12,7 +12,7 @@ Sends Hinge likes, each with a short comment, from an Android emulator. A local 
 
 First open Hinge on the emulator and go to the **Discover** tab.
 
-If the emulator sometimes freezes or crashes, also run the watchdog in a second terminal. It restarts the emulator and presses Start again:
+If the emulator crashes (`device 'emulator-5554' not found`), the bot closes what's left of it, cold-boots it (like Android Studio's *Cold Boot Now*), reopens Hinge and carries on by itself. If the emulator tends to freeze without crashing, also run the watchdog in a second terminal. It restarts a frozen emulator and presses Start again:
 
 ```bash
 .venv/bin/python tools/watchdog.py --avd Pixel_7
@@ -28,11 +28,16 @@ If the emulator sometimes freezes or crashes, also run the watchdog in a second 
   - `daily_cap`: maximum likes per day; `0` means no limit (runs until you press Stop)
   - `delay_seconds`: random gap between actions
   - `skip_probability`: share of profiles skipped at random
+  - `skip_keywords`: words or phrases that make the bot skip a profile, e.g. `["he/him", "smoke regularly"]`. Matched as whole words, ignoring case, against the profile's text (name, pronouns, prompts, details). Empty list = off
+  - `profile_read_scrolls`: how far down a profile the bot reads before checking `skip_keywords`
   - `active_hours`: hours the bot may run, as `[start, end)`
   - `mode`: `approve` or `auto`
   - `dry_run`: when true, nothing is sent or skipped
   - `device_serial`: leave empty if only one emulator is running
   - `max_restarts_in_a_row`: when something goes wrong (comment box stuck, unknown screen, Hinge closed, an error), the bot removes Hinge from Recents and opens it fresh, up to this many times in a row before giving up
+  - `auto_restart_emulator`: when the emulator crashes or stops answering, close it and cold-boot it again instead of stopping (default `true`)
+  - `avd_name`: which emulator to cold-boot, e.g. `Pixel_7` (see `emulator -list-avds`). Empty = the one that was running
+  - `emulator_boot_timeout_seconds`, `max_emulator_restarts_per_hour`: how long to wait for a boot, and how many restarts an hour before giving up
 
 ## Modes
 

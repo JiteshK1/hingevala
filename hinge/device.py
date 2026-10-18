@@ -138,6 +138,16 @@ class Device:
             duration=random.uniform(0.2, 0.4),
         )
 
+    def swipe_down(self) -> None:
+        """Scroll back up the page (the finger moves down)."""
+        w, h = self.d.window_size()
+        x = w * random.uniform(0.4, 0.6)
+        self.d.swipe(
+            x, h * random.uniform(0.30, 0.38),
+            x + random.uniform(-20, 20), h * random.uniform(0.70, 0.78),
+            duration=random.uniform(0.2, 0.4),
+        )
+
     def back(self) -> None:
         self.d.press("back")
 

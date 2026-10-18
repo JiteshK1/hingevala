@@ -13,9 +13,6 @@ The emulators it starts never show the "Send report / Don't send" popup.
 """
 import argparse
 import json
-import os
-import shutil
-import subprocess
 import sys
 import time
 import urllib.request
@@ -23,7 +20,10 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 DATA = ROOT / "data"
+
+from hinge.emulator import adb, avd_name, healthy, kill, pids, start  # noqa: E402
 CONTROL_PAGE = "http://127.0.0.1:8000"
 
 
@@ -32,32 +32,6 @@ def log(message: str) -> None:
     print(line, flush=True)
     with (DATA / "watchdog.log").open("a", encoding="utf-8") as f:
         f.write(line + "\n")
-
-
-def adb(serial: str, *args: str, timeout: float = 10) -> str:
-    """Output of an adb command, or "" if it failed or hung."""
-    try:
-        out = subprocess.run(
-            ["adb", "-s", serial, *args], capture_output=True, text=True, timeout=timeout
-        )
-        return out.stdout.strip() if out.returncode == 0 else ""
-    except subprocess.TimeoutExpired:
-        return ""
-
-
-def emulator_binary() -> str:
-    found = shutil.which("emulator")
-    if found:
-        return found
-    sdk = os.environ.get("ANDROID_HOME") or os.path.expanduser("~/Library/Android/sdk")
-    return os.path.join(sdk, "emulator", "emulator")
-
-
-def emulator_pids(avd: str) -> list:
-    out = subprocess.run(
-        ["pgrep", "-f", f"qemu-system.*-avd {avd}( |$)"], capture_output=True, text=True
-    )
-    return [int(p) for p in out.stdout.split()]
 
 
 # ---- the bot, through the control page --------------------------------------------
@@ -85,10 +59,6 @@ def stop_bot() -> None:
 
 # ---- health -----------------------------------------------------------------------
 
-def healthy(serial: str) -> bool:
-    return adb(serial, "shell", "getprop", "sys.boot_completed") == "1"
-
-
 def close_anr_dialog(serial: str) -> None:
     """Tap "Close app" on an "<app> isn't responding" dialog, if one is showing.
     If it was Hinge, the bot sees Hinge is gone and reopens it."""
@@ -109,44 +79,15 @@ def close_anr_dialog(serial: str) -> None:
 
 # ---- restarting -------------------------------------------------------------------
 
-def kill_emulator(serial: str, avd: str) -> None:
-    adb(serial, "emu", "kill", timeout=10)
-    deadline = time.time() + 20
-    while emulator_pids(avd) and time.time() < deadline:
-        time.sleep(1)
-    for pid in emulator_pids(avd):
-        log(f"Emulator didn't quit; force-killing process {pid}.")
-        subprocess.run(["kill", "-9", str(pid)])
-    time.sleep(3)
-
-
 def start_emulator(serial: str, avd: str, boot_timeout: int) -> bool:
-    """Cold-boot the AVD (a snapshot saved mid-freeze can't be trusted). True once booted."""
-    log(f"Starting the {avd} emulator (cold boot).")
-    with (DATA / "emulator.log").open("a") as out:
-        subprocess.Popen(
-            [emulator_binary(), "-avd", avd, "-no-snapshot-load", "-no-boot-anim",
-             "-crash-report-mode", "never"],  # no "Send report / Don't send" popup
-            stdout=out, stderr=subprocess.STDOUT, start_new_session=True,  # outlives us
-        )
-    deadline = time.time() + boot_timeout
-    while time.time() < deadline:
-        if healthy(serial):
-            time.sleep(10)  # let the launcher and Play services settle
-            adb(serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP")
-            adb(serial, "shell", "wm", "dismiss-keyguard")
-            log("Emulator is up.")
-            return True
-        time.sleep(5)
-    log(f"Emulator didn't finish booting within {boot_timeout}s.")
-    return False
+    return start(serial, avd, boot_timeout, log, DATA / "emulator.log")
 
 
 def recover(serial: str, avd: str, resume_bot: bool, boot_timeout: int) -> bool:
     if bot_running():
         log("Stopping the bot.")
         stop_bot()
-    kill_emulator(serial, avd)
+    kill(serial, avd, log)
     if not start_emulator(serial, avd, boot_timeout):
         return False
     if resume_bot:
@@ -170,19 +111,24 @@ def main() -> None:
     DATA.mkdir(exist_ok=True)
 
     # `adb emu avd name` prints the name, then "OK".
-    avd = args.avd or adb(args.serial, "emu", "avd", "name").split("\n")[0].strip()
+    avd = args.avd or avd_name(args.serial)
     if not avd:
         sys.exit(f"No emulator answering on {args.serial}. Pass --avd (see: emulator -list-avds).")
     log(f"Watching {avd} on {args.serial}, checking every {args.interval}s.")
 
-    if not emulator_pids(avd) and not start_emulator(args.serial, avd, args.boot_timeout):
+    if not pids(avd) and not start_emulator(args.serial, avd, args.boot_timeout):
         sys.exit("Couldn't start the emulator.")
 
     misses = 0
     bot_was_running = False  # as of the last healthy check, so a freeze doesn't erase it
     restarts = []
     while True:
-        if not emulator_pids(avd):
+        if bot_api("/api/status").get("state") == "restarting the emulator":
+            # The bot noticed first and is cold-booting it itself.
+            misses = 0
+            time.sleep(args.interval)
+            continue
+        if not pids(avd):
             problem = "The emulator process is gone (it crashed or was closed)."
         elif healthy(args.serial):
             misses = 0

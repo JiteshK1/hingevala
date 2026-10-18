@@ -1,5 +1,5 @@
 {
-  "device_serial": "",
+  "device_serial": "emulator-5554",
   "mode": "auto",
   "dry_run": false,
   "daily_cap": 0,
@@ -19,5 +19,11 @@
   "max_scrolls": 3,
   "comment_no_repeat": 40,
   "approval_timeout_seconds": 600,
-  "max_restarts_in_a_row": 3
+  "max_restarts_in_a_row": 3,
+  "skip_keywords": [],
+  "profile_read_scrolls": 8,
+  "auto_restart_emulator": true,
+  "avd_name": "Pixel_7",
+  "emulator_boot_timeout_seconds": 300,
+  "max_emulator_restarts_per_hour": 5
 }
