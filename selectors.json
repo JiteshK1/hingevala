@@ -46,6 +46,12 @@
       "dismiss": [{"textMatches": "(?i)^(keep swiping|keep browsing|not now|later|close)$"}]
     },
     {
+      "name": "seen everyone",
+      "_verified": "2026-10-24: \"You've seen everyone for now\" offers 'Change filters' and 'Review skipped profiles'. Tapping the second brings the skipped profiles back into Discover. Only matches when that button is there; otherwise the 'out of profiles' stop screen applies.",
+      "marker": [{"textMatches": "(?i)^review skipped profiles$"}],
+      "dismiss": [{"textMatches": "(?i)^review skipped profiles$"}]
+    },
+    {
       "name": "Remove/Report menu",
       "_note": "Opens when a tap lands on a profile's 'More' button. Back closes it.",
       "marker": [{"description": "Press back to close"}],

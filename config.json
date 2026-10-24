@@ -37,7 +37,7 @@
   "avd_name": "Pixel_7",
   "emulator_boot_timeout_seconds": 300,
   "max_emulator_restarts_per_hour": 5,
-  "ai_comments": true,
+  "ai_comments": false,
   "ai_model": "claude-haiku-5-5",
   "ai_style": "",
   "ai_prefer_prompts": true
