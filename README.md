@@ -18,6 +18,17 @@ If the emulator crashes (`device 'emulator-5554' not found`), the bot closes wha
 .venv/bin/python tools/watchdog.py --avd Pixel_7
 ```
 
+## Run on a real phone
+
+The same bot runs on a phone, driven from this computer over adb (the screen is read through uiautomator, as on the emulator).
+
+1. On the phone: Settings → About phone → tap **Build number** 7 times. Then Settings → System → Developer options → turn on **USB debugging** and **Stay awake** (the screen stays on while charging).
+2. Connect it by USB, unlock it and allow the "Allow USB debugging?" prompt (tick *Always allow*).
+3. `adb devices` shows its serial. Put it in `config.json` as `device_serial` (with the emulator closed, leaving it empty also works).
+4. Open Hinge on the Discover tab, check with `.venv/bin/python tools/doctor.py`, then run `app.py` as usual.
+
+Keep the phone plugged in and unlocked while it runs. If the screen turns off the bot turns it back on, but it can't get past a PIN lock. If the phone stops answering over adb (unplugged, debugging turned off), the bot waits up to `emulator_boot_timeout_seconds` for it to come back. Cold-booting and `tools/watchdog.py` are for the emulator only.
+
 ## How it works
 
 - `hinge/bot.py` is the loop. It reads the screen, skips some profiles at random, picks a random photo or prompt, writes a comment, sends the like and waits a random time. It stops on any screen it doesn't recognise.

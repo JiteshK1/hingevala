@@ -58,6 +58,7 @@ class Bot:
         self.dry_runs = 0
         self._failures = 0
         self._serial = ""
+        self._phone = False  # a real phone rather than an emulator
         self._avd = ""
         self._emulator_restarts: List[float] = []
         self._ai = None
@@ -133,12 +134,19 @@ class Bot:
 
     def _run(self) -> None:
         try:
-            self.state = "connecting to emulator"
-            self._serial = self.config["device_serial"] or emulator.first_emulator_serial()
-            self._avd = self.config["avd_name"] or emulator.avd_name(self._serial)
-            if not emulator.healthy(self._serial):
-                if not self._restart_emulator("The emulator isn't running."):
+            self._serial = self.config["device_serial"] or emulator.first_device_serial()
+            self._phone = not emulator.is_emulator(self._serial)
+            self.state = "connecting to the phone" if self._phone else "connecting to emulator"
+            if self._phone:
+                if not emulator.healthy(self._serial) and not self._wait_for_phone(
+                    f"The phone {self._serial} isn't connected."
+                ):
                     return
+            else:
+                self._avd = self.config["avd_name"] or emulator.avd_name(self._serial)
+                if not emulator.healthy(self._serial):
+                    if not self._restart_emulator("The emulator isn't running."):
+                        return
             dev, ui = self._connect()
             comments = CommentPicker(self.root / "comments.txt", self.config["comment_no_repeat"])
             self._ai = self._make_ai_commenter()
@@ -174,6 +182,8 @@ class Bot:
                 # opening it fresh. Things a restart can't fix (cap, verification, paywall) break.
                 problem = None
                 try:
+                    if dev.wake():
+                        self._log("The screen was off; turned it on.")
                     screen, detail = ui.detect()
                     if screen in ("stop", "unknown") and not tried_discover_tab and ui.go_to_discover():
                         # Probably just on another tab (e.g. Matches shows an upgrade offer).
@@ -212,9 +222,15 @@ class Bot:
 
                 if problem is None or self._stop.is_set():
                     continue
-                if self.config["auto_restart_emulator"] and not emulator.healthy(self._serial):
-                    # Reopening Hinge can't help when the emulator itself crashed or froze.
-                    if not self._restart_emulator(f"{problem} The emulator isn't answering."):
+                if (self._phone or self.config["auto_restart_emulator"]) and not emulator.healthy(self._serial):
+                    # Reopening Hinge can't help when the device itself is gone.
+                    if self._phone:
+                        back = self._wait_for_phone(
+                            f"{problem} The phone isn't answering over adb (unplugged, or USB debugging off?)."
+                        )
+                    else:
+                        back = self._restart_emulator(f"{problem} The emulator isn't answering.")
+                    if not back:
                         break
                     dev, ui = self._connect()
                     restarts = 0
@@ -249,7 +265,7 @@ class Bot:
             self._log("Stopped.")
 
     def _connect(self):
-        """Fresh connection to the emulator. Right after a boot uiautomator2's helper
+        """Fresh connection to the phone or emulator. Right after a boot uiautomator2's helper
         may still be starting, so this retries for a while."""
         # Imported here so the control page still starts when no device is attached.
         from .device import Device
@@ -264,6 +280,22 @@ class Bot:
                 if attempt == 5 or self._stop.is_set():
                     raise
                 self._stop.wait(10)
+
+    def _wait_for_phone(self, problem: str) -> bool:
+        """A phone can't be restarted from here: wait for it to come back (plugged in again,
+        USB debugging allowed again) for up to emulator_boot_timeout_seconds."""
+        timeout = self.config["emulator_boot_timeout_seconds"]
+        self._log(f"{problem} Waiting up to {timeout // 60} min for it to come back.")
+        self.state = "waiting for the phone"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._stop.wait(5):
+                return False
+            if emulator.healthy(self._serial):
+                self._log("The phone is back.")
+                return True
+        self._log("The phone didn't come back; stopping.")
+        return False
 
     def _restart_emulator(self, problem: str) -> bool:
         """Close the emulator (force-killing it if it's hung) and cold-boot it again,

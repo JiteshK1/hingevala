@@ -151,6 +151,15 @@ class Device:
     def back(self) -> None:
         self.d.press("back")
 
+    def wake(self) -> bool:
+        """Turn the screen on if it's off (a phone's screen times out; an emulator's
+        doesn't matter). True if it was off."""
+        if self.d.info.get("screenOn", True):
+            return False
+        self.d.screen_on()
+        time.sleep(1.5)
+        return True
+
     def foreground_package(self) -> str:
         return self.d.app_current().get("package", "")
 

@@ -1,4 +1,5 @@
 """Starting, checking and killing the Android emulator, without Android Studio.
+(healthy() and adb() work for a real phone too.)
 
 Used by the bot (to cold-boot the emulator when it crashes mid-run) and by
 tools/watchdog.py (to restart it when it freezes)."""
@@ -32,16 +33,21 @@ def adb(serial: str, *args: str, timeout: float = 10) -> str:
         return ""
 
 
-def first_emulator_serial() -> str:
-    """Serial of the first emulator adb knows about, or the default emulator-5554."""
+def first_device_serial() -> str:
+    """Serial of the first phone or emulator adb knows about, or the default emulator-5554."""
     try:
         out = subprocess.run(
             [_binary("adb", "platform-tools"), "devices"], capture_output=True, text=True, timeout=10
         ).stdout
     except (subprocess.TimeoutExpired, OSError):
         out = ""
-    found = re.findall(r"^(emulator-\d+)\s", out, re.MULTILINE)
+    found = re.findall(r"^(\S+)\s+device$", out, re.MULTILINE)
     return found[0] if found else "emulator-5554"
+
+
+def is_emulator(serial: str) -> bool:
+    """False for a real phone (USB serial, or ip:port over wireless debugging)."""
+    return serial.startswith("emulator-")
 
 
 def healthy(serial: str) -> bool:
