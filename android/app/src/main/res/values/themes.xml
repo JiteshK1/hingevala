@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Always dark: the HUD look. -->
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">#14141F</item>
+        <item name="android:colorAccent">#FD267D</item>
+        <item name="android:colorControlActivated">#FD267D</item>
+        <item name="android:textColorHighlight">#66FD267D</item>
+    </style>
+</resources>
